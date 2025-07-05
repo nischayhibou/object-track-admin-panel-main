@@ -1,0 +1,32 @@
+{
+  "server": {
+    "apiKey": "222b73b6-dacd-459b-b73f-21ed85a89550",
+    "port": 5000,
+    "maxRecentObjects": 10,
+    "apiKeyHeader": "x-api-key",
+    "jwtSecret": "Hibousoft_secret_key",
+    "cookieName": "token",
+    "cookieOptions": {
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "strict",
+      "maxAgeMs": 600000
+    }
+  },
+  "database": {
+    "user": "postgres",
+    "host": "localhost",
+    "database": "yolo_db",
+    "password": "Hibousoft2025",
+    "port": 5432,
+    "table": "camera_category_mapping",
+    "dropdownTable": "dropdown_options"
+  },
+  "limits": {
+    "maxRecentObjects": 10
+  },
+  "cors": {
+    "originPattern": "^http://localhost:\\d+$",
+    "credentials": true
+  }
+}
