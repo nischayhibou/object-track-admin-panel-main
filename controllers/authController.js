@@ -60,6 +60,38 @@ export const login = async (req, res) => {
   }
 };
 
+export const refreshToken = async (req, res) => {
+  try {
+    // Get user info from the authenticated request
+    const userId = req.user.userId;
+    
+    // Get user details from database
+    const result = await pool.query('SELECT * FROM users WHERE userid = $1', [userId]);
+    const user = result.rows[0];
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Generate new token
+    const newToken = jwt.sign({ userId: user.userid }, jwtSecret, { 
+      expiresIn: cookieOptions.maxAgeMs / 1000 + 's' 
+    });
+
+    // Set new cookie
+    res.cookie(cookieName, newToken, cookieOptions);
+    
+    res.json({ 
+      message: 'Token refreshed successfully', 
+      token: newToken, 
+      username: user.username, 
+      userId: user.userid 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const logout = (req, res) => {
   res.clearCookie(cookieName);
   res.json({ message: 'Logged out successfully' });

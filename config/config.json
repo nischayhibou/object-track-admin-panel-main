@@ -10,7 +10,7 @@
       "httpOnly": true,
       "secure": true,
       "sameSite": "strict",
-      "maxAgeMs": 600000
+      "maxAgeMs": 86400000
     }
   },
   "database": {

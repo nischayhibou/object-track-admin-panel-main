@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import axios from '@/utils/axiosInstance';
 import { Search, Camera, Activity, Users, AlertTriangle, LogOut, Plus, MoreVertical } from 'lucide-react';
 import { useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 
 interface RecentObject {
@@ -27,8 +28,17 @@ interface RecentObject {
 const Dashboard = () => {
   const { toast } = useToast();
   const menuRef = useRef<HTMLDivElement>(null);
+  
+
   const [searchTerm, setSearchTerm] = useState('');
   const [userInfo, setUserInfo] = useState({ username: '', firstname: '', lastname: '' });
+  const [liveStats, setLiveStats] = useState({
+    totalObjects: 0,
+    activeTracking: 0,
+    inactiveAlerts: 0,
+    latestUpdate: null,
+    typeCounts: {}
+  });
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
   const username = localStorage.getItem('username');
@@ -47,6 +57,84 @@ const Dashboard = () => {
     cameraId: '',
     cameraURL: '',
     objectId: ''
+  });
+
+  // WebSocket connection for real-time updates
+  const wsUrl = `ws://localhost:5000/ws`;
+  const { isConnected, isConnecting, error: wsError, requestStats, requestUpdates, requestFilteredStats } = useWebSocket({
+    url: wsUrl,
+    token: token || '',
+    onTokenExpired: () => {
+      console.log('Token refresh failed, redirecting to login');
+      toast({
+        title: "Session Expired",
+        description: "Please log in again to continue.",
+        variant: "destructive"
+      });
+      handleLogout();
+    },
+    onMessage: (message) => {
+      switch (message.type) {
+        case 'INITIAL_STATS':
+        case 'COUNT_UPDATE':
+          // Update stats with real-time data
+          if (message.data?.stats) {
+            const totalObjects = message.data.stats.reduce((sum: number, stat: any) => sum + stat.totalObjects, 0);
+            const activeTracking = message.data.stats.reduce((sum: number, stat: any) => sum + stat.recentObjects, 0);
+            setLiveStats({
+              totalObjects,
+              activeTracking,
+              inactiveAlerts: 0,
+              latestUpdate: message.data.timestamp,
+              typeCounts: {}
+            });
+          }
+          break;
+        case 'OBJECT_UPDATES':
+          // Update recent objects with real-time data
+          if (message.data && Array.isArray(message.data)) {
+            setRecentObjects(message.data);
+          }
+          break;
+        case 'FILTERED_STATS':
+          // Handle filtered stats
+          console.log('Filtered stats:', message.data);
+          break;
+        case 'REAL_TIME_UPDATE':
+          // Handle real-time updates
+          console.log('Real-time update:', message.data);
+          break;
+        case 'ERROR':
+          console.error('WebSocket error:', message.message);
+          break;
+        default:
+          console.log('Unknown WebSocket message:', message);
+      }
+    },
+    onConnect: () => {
+      console.log('WebSocket connected');
+      toast({
+        title: "Success",
+        description: "Real-time connection established",
+        variant: "default"
+      });
+    },
+    onDisconnect: () => {
+      console.log('WebSocket disconnected');
+      toast({
+        title: "Warning",
+        description: "Real-time connection lost",
+        variant: "destructive"
+      });
+    },
+    onError: (error) => {
+      console.error('WebSocket error:', error);
+      toast({
+        title: "Error",
+        description: "Real-time connection error",
+        variant: "destructive"
+      });
+    }
   });
 
   useEffect(() => {
@@ -86,35 +174,45 @@ useEffect(() => {
     setUserInfo(response.data);
   })
   .catch(() => navigate('/'));
-}, []);
+}, [token, username, navigate]);
 
-const stats = (() => {
-  if (!Array.isArray(recentObjects) || recentObjects.length === 0) {
+  // Memoize stats calculation to prevent unnecessary re-renders
+  const stats = useMemo(() => {
+    // Use live stats from WebSocket if available, otherwise fall back to calculated stats
+    if (isConnected && liveStats.totalObjects > 0) {
+      return {
+        totalObjects: liveStats.totalObjects,
+        activeTracking: liveStats.activeTracking,
+        alerts: liveStats.inactiveAlerts,
+        latestDateTime: liveStats.latestUpdate
+      };
+    }
+
+    // Fallback to calculated stats from recentObjects
+    if (!Array.isArray(recentObjects) || recentObjects.length === 0) {
+      return {
+        totalObjects: 0,
+        activeTracking: 0,
+        alerts: 0,
+        latestDateTime: null
+      };
+    }
+
+    const totalObjects = recentObjects.length;
+    const activeTracking = recentObjects.filter(obj => obj.status === 'Active').length;
+    const alerts = recentObjects.filter(obj => obj.status === 'Inactive').length;
+    const latestObject = recentObjects.reduce((latest, current) =>
+      new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
+    );
+    const latestDateTime = latestObject.timestamp;
+
     return {
-      totalObjects: 0,
-      activeTracking: 0,
-      alerts: 0,
-      //users: 24,
-      latestDateTime: null
+      totalObjects,
+      activeTracking,
+      alerts,
+      latestDateTime
     };
-  }
-
-  const totalObjects = recentObjects.length;
-  const activeTracking = recentObjects.filter(obj => obj.status === 'Active').length;
-  const alerts = recentObjects.filter(obj => obj.status === 'Inactive').length;
-  const latestObject = recentObjects.reduce((latest, current) =>
-    new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
-  );
-  const latestDateTime = latestObject.timestamp;
-
-  return {
-    totalObjects,
-    activeTracking,
-    alerts,
-    //users: 24,
-    latestDateTime
-  };
-})();
+  }, [isConnected, liveStats, recentObjects]);
 
 
   const getStatusColor = (status: string) => {
@@ -182,16 +280,17 @@ useEffect(() => {
     .catch(console.error);
 }, []);
 
-
 useEffect(() => {
-  axios.get(`/objects/user/${userid}`)
-    .then(res => setRecentObjects(res.data))
-    .catch(() => toast({
-      title: "Error",
-      description: "Failed to load recent objects.",
-      variant: "destructive"
-    }));
-}, [userid]);
+  if (userid) {
+    axios.get(`/objects/user/${userid}`)
+      .then(res => setRecentObjects(res.data))
+      .catch(() => toast({
+        title: "Error",
+        description: "Failed to load recent objects.",
+        variant: "destructive"
+      }));
+  }
+}, [userid, toast]);
 
 
   const filteredObjects = recentObjects.filter((obj) => {
@@ -224,7 +323,7 @@ const handleFormSubmit = async (e: React.FormEvent) => {
     const payload = {
       id : newObject.id,
       userId: String(response.data.userid),
-      cameraId: newObject.cameraId,
+      cameraId: String(newObject.cameraId),
       cameraURL: newObject.cameraURL,
       userName: response.data.username,
       objectId: newObject.objectId,
@@ -315,6 +414,24 @@ const handleFormSubmit = async (e: React.FormEvent) => {
                 <h1 className="text-2xl font-bold text-gray-900">TraceEye Dashboard</h1>
             </div>
             <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                    {isConnected ? (
+                        <div className="flex items-center text-green-600">
+                            <div className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse"></div>
+                            <span className="text-xs">Live</span>
+                        </div>
+                    ) : isConnecting ? (
+                        <div className="flex items-center text-yellow-600">
+                            <div className="w-2 h-2 bg-yellow-500 rounded-full mr-1 animate-pulse"></div>
+                            <span className="text-xs">Connecting...</span>
+                        </div>
+                    ) : (
+                        <div className="flex items-center text-red-600">
+                            <div className="w-2 h-2 bg-red-500 rounded-full mr-1"></div>
+                            <span className="text-xs">Offline</span>
+                        </div>
+                    )}
+                </div>
                 <span className="text-sm text-gray-600">Welcome, {userInfo.firstname + " " + userInfo.lastname}</span>
                 <Button variant="outline" size="sm" onClick={handleLogout}>
                     <LogOut className="h-4 w-4 mr-2" />
