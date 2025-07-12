@@ -1,5 +1,4 @@
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +9,7 @@ import { DATE_TIME_FORMAT } from '@/dateFormat';
 import axios from '@/utils/axiosInstance';
 import { Search, Camera, Activity, Users, AlertTriangle, LogOut, Plus, MoreVertical } from 'lucide-react';
 import { useRef } from 'react';
+import { useToast } from '@/hooks/use-toast';
 
 
 interface RecentObject {
@@ -25,6 +25,7 @@ interface RecentObject {
 }
 
 const Dashboard = () => {
+  const { toast } = useToast();
   const menuRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [userInfo, setUserInfo] = useState({ username: '', firstname: '', lastname: '' });
@@ -159,10 +160,18 @@ const stats = (() => {
 
     try {
       await axios.delete(`/objects/${object.id}`);
-      toast.success("Object deleted successfully!");
+      toast({
+        title: "Success",
+        description: "Object deleted successfully!",
+        variant: "default"
+      });
       setRecentObjects(prev => prev.filter(item => item.id !== object.id));
     } catch (error) {
-      toast.error("Failed to delete object.");
+      toast({
+        title: "Error",
+        description: "Failed to delete object.",
+        variant: "destructive"
+      });
       console.error("Delete error:", error);
     }
   };
@@ -177,7 +186,11 @@ useEffect(() => {
 useEffect(() => {
   axios.get(`/objects/user/${userid}`)
     .then(res => setRecentObjects(res.data))
-    .catch(() => toast.error("Failed to load recent objects."));
+    .catch(() => toast({
+      title: "Error",
+      description: "Failed to load recent objects.",
+      variant: "destructive"
+    }));
 }, [userid]);
 
 
@@ -194,7 +207,11 @@ useEffect(() => {
 const handleFormSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
   if (!newObject.type || !newObject.status) {
-    toast.warn("Please select both type and status.");
+    toast({
+      title: "Warning",
+      description: "Please select both type and status.",
+      variant: "destructive"
+    });
     return;
   }
 
@@ -214,16 +231,24 @@ const handleFormSubmit = async (e: React.FormEvent) => {
       type: newObject.type,
       status: newObject.status,
       location: newObject.location,
-      lastUpdatedBy: response.data.lastmodifiedby,
+      lastUpdatedBy: response.data.username,
     };
 
     // Call the unified upsert API
     const result = await axios.post(`/objects`, payload);
 
     if (result.data.success) {
-      toast.success(`Object ${result.data.action} successfully!`);
+      toast({
+        title: "Success",
+        description: `Object ${result.data.action} successfully!`,
+        variant: "default"
+      });
     } else {
-      toast.warning("No changes made to the object.");
+      toast({
+        title: "Warning",
+        description: "No changes made to the object.",
+        variant: "destructive"
+      });
     }
 
     // Reset modal and reload data
@@ -244,16 +269,36 @@ const handleFormSubmit = async (e: React.FormEvent) => {
   } catch (error: any) {
     if (error.response) {
       if (error.response.status === 404) {
-        toast.error("Error 404: API endpoint not found.");
+        toast({
+          title: "Error",
+          description: "Error 404: API endpoint not found.",
+          variant: "destructive"
+        });
       } else if (error.response.status === 500) {
-        toast.error("Internal Server Error. Please try again later.");
+        toast({
+          title: "Error",
+          description: "Internal Server Error. Please try again later.",
+          variant: "destructive"
+        });
       } else {
-        toast.error(`Error ${error.response.status}: ${error.response.data?.error || "Unexpected error"}`);
+        toast({
+          title: "Error",
+          description: `Error ${error.response.status}: ${error.response.data?.error || "Unexpected error"}`,
+          variant: "destructive"
+        });
       }
     } else if (error.request) {
-      toast.warning("No response from server. Please check your network.");
+      toast({
+        title: "Warning",
+        description: "No response from server. Please check your network.",
+        variant: "destructive"
+      });
     } else {
-      toast.error("Error: " + error.message);
+      toast({
+        title: "Error",
+        description: "Error: " + error.message,
+        variant: "destructive"
+      });
     }
     console.error("Error saving/updating object:", error);
   }
@@ -520,7 +565,6 @@ const handleFormSubmit = async (e: React.FormEvent) => {
         </div>
     </div>
 )}
-      <ToastContainer position="top-right" autoClose={3000} hideProgressBar />
     </div>
   );
 };

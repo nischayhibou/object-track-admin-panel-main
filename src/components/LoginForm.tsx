@@ -6,11 +6,12 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Eye, EyeOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+
 import { API_BASE_URL, API_KEY } from '@/config';
+import { useToast } from '@/hooks/use-toast';
 
 const LoginForm = () => {
+  const { toast } = useToast();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,11 +39,19 @@ const LoginForm = () => {
       localStorage.setItem('username', response.data.username);
       localStorage.setItem('userid', response.data.userId);
 
-      toast.success('Login successful!');
+      toast({
+        title: "Success",
+        description: "Login successful!",
+        variant: "default"
+      });
       navigate('/dashboard');
     } catch (err) {
       const message = err.response?.data?.error || 'Login failed! Please check your credentials.';
-      toast.error(message);
+      toast({
+        title: "Error",
+        description: message,
+        variant: "destructive"
+      });
     } finally {
       setLoading(false);
     }
@@ -50,7 +59,6 @@ const LoginForm = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <ToastContainer position="top-right" autoClose={3000} hideProgressBar />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
