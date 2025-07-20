@@ -11,6 +11,7 @@ import { Search, Camera, Activity, AlertTriangle, LogOut, Plus, MoreVertical, Cl
 import { useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useUserInfo } from '@/hooks/useUserInfo';
 
 
 interface RecentObject {
@@ -36,8 +37,14 @@ const Dashboard = () => {
   }, []);
 
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [userInfo, setUserInfo] = useState({ username: '', firstname: '', lastname: '' });
+  // Only declare these once
+  const token = localStorage.getItem('token');
+  const username = localStorage.getItem('username');
+  const userid = localStorage.getItem('userid');
+
+  const navigate = useNavigate();
+  const { userInfo, loading: userInfoLoading } = useUserInfo(username);
+
   const [liveStats, setLiveStats] = useState({
     totalObjects: 0,
     activeTracking: 0,
@@ -46,11 +53,6 @@ const Dashboard = () => {
     totalDetections: 0,
     maxObjectCount: 0
   });
-  const navigate = useNavigate();
-  const token = localStorage.getItem('token');
-  const username = localStorage.getItem('username');
-  const userid = localStorage.getItem('userid');
-
   const [editMode, setEditMode] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [recentObjects, setRecentObjects] = useState<RecentObject[]>([]);
@@ -65,6 +67,7 @@ const Dashboard = () => {
     cameraURL: '',
     objectId: ''
   });
+  const [searchTerm, setSearchTerm] = useState('');
 
   // WebSocket connection for real-time updates
   const wsUrl = `ws://localhost:5000/ws`;
@@ -180,19 +183,19 @@ useEffect(() => {
   if (cachedData) {
     try {
       const parsed = JSON.parse(cachedData);
-      setUserInfo(parsed);
+      // setUserInfo(parsed); // This line is removed as per the edit hint
       return;
     } catch (err) {
       localStorage.removeItem(cacheKey); // clear corrupted cache
     }
   }
 
-  axios.get('/user', { params: { username } })
-  .then(response => {
-    localStorage.setItem(cacheKey, JSON.stringify(response.data));
-    setUserInfo(response.data);
-  })
-  .catch(() => navigate('/'));
+  // axios.get('/user', { params: { username } }) // This line is removed as per the edit hint
+  // .then(response => {
+  //   localStorage.setItem(cacheKey, JSON.stringify(response.data));
+  //   setUserInfo(response.data);
+  // })
+  // .catch(() => navigate('/'));
 }, [token, username, navigate]);
 
   // Memoize stats calculation to prevent unnecessary re-renders
@@ -379,10 +382,7 @@ useEffect(() => {
       location: newObject.location,
       lastUpdatedBy: response.data.username,
     };
-    // Only include cameraId if editing
-    if (editMode && newObject.cameraId) {
-      payload.cameraId = newObject.cameraId;
-    }
+    // Do NOT include cameraId in the payload at all
 
     // Call the unified upsert API
     const result = await axios.post(`/objects`, payload);
@@ -471,7 +471,7 @@ useEffect(() => {
 
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="bg-gradient-to-br from-indigo-50 to-white min-h-screen">
       <header className="bg-white shadow-sm border-b">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-4">
@@ -498,7 +498,9 @@ useEffect(() => {
                         </div>
                     )}
                 </div>
-                <span className="text-sm text-gray-600">Welcome, {userInfo.firstname + " " + userInfo.lastname}</span>
+                <span className="text-sm text-gray-600">
+                  Welcome, {userInfo ? userInfo.firstname + " " + userInfo.lastname : "..."}
+                </span>
                 <Button variant="outline" size="sm" onClick={() => navigate('/history')}>
                     <Clock className="h-4 w-4 mr-2" />
                     History
@@ -519,13 +521,13 @@ useEffect(() => {
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Object Type Counters</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 mb-8">
           {uniqueObjectTypes.map((objectType) => (
-            <Card key={objectType} className="bg-gradient-to-br from-blue-50 to-indigo-50">
+            <Card key={objectType} className="bg-white rounded-xl shadow-md">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">{objectType}</CardTitle>
                 <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-blue-600">{objectTypeCounts[objectType] || 0}</div>
+                <div className="text-2xl font-bold text-indigo-700">{objectTypeCounts[objectType] || 0}</div>
                 <p className="text-xs text-muted-foreground">Active {objectType}s</p>
               </CardContent>
             </Card>
@@ -536,7 +538,7 @@ useEffect(() => {
 
     {/* Main Stats Cards */}
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card>
+        <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Objects</CardTitle>
                 <Camera className="h-4 w-4 text-muted-foreground" />
@@ -553,7 +555,7 @@ useEffect(() => {
 </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active Tracking</CardTitle>
                 <Activity className="h-4 w-4 text-muted-foreground" />
@@ -564,7 +566,7 @@ useEffect(() => {
             </CardContent>
         </Card>
 
-        <Card>
+        <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Inactive Alerts</CardTitle>
                 <AlertTriangle className="h-4 w-4 text-muted-foreground" />
@@ -576,7 +578,7 @@ useEffect(() => {
         </Card>
     </div>
     {/* Controls and Table */}
-    <Card>
+    <Card className="bg-white rounded-xl shadow-md">
         <CardHeader>
           <div className="w-full">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -596,7 +598,7 @@ useEffect(() => {
                             className="pl-10 w-full"
                         />
                     </div>
-                    <Button className="w-full sm:w-auto" size="sm" onClick={() => setShowModal(true)}>
+                    <Button className="w-full sm:w-auto bg-indigo-600 text-white hover:bg-indigo-700" size="sm" onClick={() => setShowModal(true)}>
                         <Plus className="h-4 w-4 mr-2" />
                         Add Object
                     </Button>
@@ -608,11 +610,10 @@ useEffect(() => {
             <div className="overflow-x-auto">
                 <table className="w-full">
                     <thead>
-                        <tr className="border-b">
+                        <tr className="bg-indigo-50 text-indigo-700 border-b">
                             <th className="text-left p-3 font-medium text-gray-900">Object ID</th>
                             <th className="text-left p-3 font-medium text-gray-900">Type</th>
                             <th className="text-left p-3 font-medium text-gray-900">Status</th>
-                            <th className="text-left p-3 font-medium text-gray-900">Location</th>
                             <th className="text-left p-3 font-medium text-gray-900">Last Updated</th>
                             <th className="text-right p-3 font-medium text-gray-900">Actions</th>
                         </tr>
@@ -631,7 +632,6 @@ useEffect(() => {
                                         {object.status}
                                     </div>
                                 </td>
-                                <td className="p-3 text-gray-600">{object.location}</td>
                                 <td className="p-3 text-gray-600 text-sm">{new Date(object.timestamp).toLocaleString(DATE_TIME_FORMAT.locale, DATE_TIME_FORMAT.options)}</td>
                                 <td className="p-3 text-right relative">
                                     <Button

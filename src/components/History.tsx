@@ -8,6 +8,7 @@ import { DATE_TIME_FORMAT } from '@/dateFormat';
 import axios from '@/utils/axiosInstance';
 import { Search, Camera, Activity, Clock, Filter, Download, Calendar, BarChart3 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useUserInfo } from '@/hooks/useUserInfo';
 
 interface ActivityPeriod {
   startTime: string;
@@ -61,6 +62,7 @@ const History = () => {
   const username = localStorage.getItem('username');
   const userid = localStorage.getItem('userid');
 
+  const { userInfo, loading: userInfoLoading } = useUserInfo(username);
   const [historyData, setHistoryData] = useState<StatusHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -169,7 +171,7 @@ const History = () => {
       case 'Active': return 'bg-green-500';
       case 'Lost': return 'bg-red-500';
       case 'Inactive': return 'bg-gray-500';
-      default: return 'bg-blue-500';
+      default: return 'bg-indigo-500';
     }
   };
 
@@ -234,7 +236,7 @@ const History = () => {
   }, [historyData, searchTerm]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="bg-gradient-to-br from-indigo-50 to-white min-h-screen">
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
@@ -243,6 +245,15 @@ const History = () => {
               <h1 className="text-2xl font-bold text-gray-900">TraceEye History</h1>
             </div>
             <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center text-green-600">
+                  <div className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse"></div>
+                  <span className="text-xs">Live</span>
+                </div>
+              </div>
+              <span className="text-sm text-gray-600">
+                Welcome, {userInfo ? userInfo.firstname + " " + userInfo.lastname : "..."}
+              </span>
               <Button variant="outline" size="sm" onClick={() => navigate('/dashboard')}>
                 Dashboard
               </Button>
@@ -257,7 +268,7 @@ const History = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <Card>
+          <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Detections</CardTitle>
               <Activity className="h-4 w-4 text-muted-foreground" />
@@ -268,7 +279,7 @@ const History = () => {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Objects</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
@@ -279,7 +290,7 @@ const History = () => {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="bg-white rounded-xl shadow-md border-l-4 border-indigo-500 text-indigo-700">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Avg Confidence</CardTitle>
               <Clock className="h-4 w-4 text-muted-foreground" />
@@ -294,7 +305,7 @@ const History = () => {
         </div>
 
         {/* Controls */}
-        <Card className="mb-6">
+        <Card className="mb-6 bg-white rounded-xl shadow-md">
           <CardHeader>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -340,12 +351,12 @@ const History = () => {
         </Card>
 
         {/* History Table */}
-        <Card>
+        <Card className="bg-white rounded-xl shadow-md">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b bg-gray-50">
+                  <tr className="border-b bg-indigo-50 text-indigo-700">
                     <th className="text-left p-4 font-medium text-gray-900">Serial No.</th>
                     <th className="text-left p-4 font-medium text-gray-900">ID</th>
                     <th className="text-left p-4 font-medium text-gray-900">Object ID</th>
