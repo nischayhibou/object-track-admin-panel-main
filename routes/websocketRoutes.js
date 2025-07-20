@@ -104,17 +104,18 @@ async function sendInitialStats(ws, userId) {
 
     console.log(`Found ${activeMappings.rows.length} active mappings for user ${userId}`);
 
-    // Get real-time counts for each active mapping
+    // Get real-time detection counts for each active mapping
     const stats = [];
     
     for (const mapping of activeMappings.rows) {
-      // Since detections table has different structure, we'll get general stats
-      // and filter by cameraid if it matches
+      // Get detection counts from detections table using cameraid
       const countResult = await pool.query(`
         SELECT 
-          COUNT(*) as total_objects,
+          COUNT(*) as total_detections,
           MAX(detection_time) as latest_detection,
-          COUNT(CASE WHEN detection_time > NOW() - INTERVAL '1 hour' THEN 1 END) as recent_objects
+          COUNT(CASE WHEN detection_time > NOW() - INTERVAL '1 hour' THEN 1 END) as recent_detections,
+          SUM(object_count) as total_objects,
+          MAX(object_count) as max_object_count
         FROM detections 
         WHERE cameraid = $1
           AND detection_time > NOW() - INTERVAL '24 hours'
@@ -128,12 +129,31 @@ async function sendInitialStats(ws, userId) {
         objectId: mapping.objectid,
         type: mapping.type,
         location: mapping.location,
+        totalDetections: parseInt(count.total_detections) || 0,
+        recentDetections: parseInt(count.recent_detections) || 0,
         totalObjects: parseInt(count.total_objects) || 0,
-        recentObjects: parseInt(count.recent_objects) || 0,
+        maxObjectCount: parseInt(count.max_object_count) || 0,
         latestDetection: count.latest_detection,
         status: mapping.status
       });
     }
+
+    // Get overall stats for the user
+    const overallStats = await pool.query(`
+      SELECT 
+        COUNT(DISTINCT d.detection_id) as total_detections,
+        COUNT(DISTINCT d.camera_id) as active_cameras,
+        SUM(d.object_count) as total_objects,
+        MAX(d.object_count) as max_object_count,
+        MAX(d.detection_time) as latest_detection
+      FROM detections d
+      INNER JOIN camera_category_mapping ccm ON d.camera_id = ccm.camera_id
+      WHERE ccm.userid = $1 
+        AND ccm.status = 'Active'
+        AND d.detection_time > NOW() - INTERVAL '24 hours'
+    `, [userId]);
+
+    const overall = overallStats.rows[0];
 
     ws.send(JSON.stringify({
       type: 'INITIAL_STATS',
@@ -141,6 +161,13 @@ async function sendInitialStats(ws, userId) {
         userId: userId,
         activeMappings: activeMappings.rows.length,
         stats: stats,
+        overallStats: {
+          totalDetections: parseInt(overall.total_detections) || 0,
+          activeCameras: parseInt(overall.active_cameras) || 0,
+          totalObjects: parseInt(overall.total_objects) || 0,
+          maxObjectCount: parseInt(overall.max_object_count) || 0,
+          latestDetection: overall.latest_detection
+        },
         timestamp: new Date().toISOString()
       }
     }));
@@ -190,15 +217,15 @@ async function sendObjectUpdates(ws, userId) {
         d.confidence,
         d.object_count,
         d.video_filename,
-        d.cameraid,
+        d.camera_id,
         d.category_id,
         ccm.objectid,
         ccm.type,
         ccm.status,
         ccm.location
       FROM detections d
-      LEFT JOIN camera_category_mapping ccm 
-        ON d.cameraid = ccm.cameraid
+      INNER JOIN camera_category_mapping ccm 
+        ON d.camera_id = ccm.camera_id
       WHERE ccm.userid = $1 
         AND d.detection_time > NOW() - INTERVAL '1 hour'
         AND ccm.status = 'Active'
@@ -215,7 +242,7 @@ async function sendObjectUpdates(ws, userId) {
         status: detection.status || 'Active',
         location: detection.location || 'Unknown',
         timestamp: detection.detection_time,
-        cameraId: detection.cameraid,
+        cameraId: detection.camera_id,
         categoryId: detection.category_id,
         confidence: detection.confidence,
         objectCount: detection.object_count,
@@ -239,19 +266,19 @@ async function sendFilteredStats(ws, userId, filters) {
     let timeFilter = '';
     switch (timeRange) {
       case '1h':
-        timeFilter = "AND detection_time > NOW() - INTERVAL '1 hour'";
+        timeFilter = "AND d.detection_time > NOW() - INTERVAL '1 hour'";
         break;
       case '6h':
-        timeFilter = "AND detection_time > NOW() - INTERVAL '6 hours'";
+        timeFilter = "AND d.detection_time > NOW() - INTERVAL '6 hours'";
         break;
       case '24h':
-        timeFilter = "AND detection_time > NOW() - INTERVAL '24 hours'";
+        timeFilter = "AND d.detection_time > NOW() - INTERVAL '24 hours'";
         break;
       case '7d':
-        timeFilter = "AND detection_time > NOW() - INTERVAL '7 days'";
+        timeFilter = "AND d.detection_time > NOW() - INTERVAL '7 days'";
         break;
       default:
-        timeFilter = "AND detection_time > NOW() - INTERVAL '24 hours'";
+        timeFilter = "AND d.detection_time > NOW() - INTERVAL '24 hours'";
     }
 
     let whereClause = `WHERE ccm.userid = $1 ${timeFilter}`;
@@ -259,7 +286,7 @@ async function sendFilteredStats(ws, userId, filters) {
     let paramIndex = 2;
 
     if (cameraId) {
-      whereClause += ` AND d.cameraid = $${paramIndex}`;
+      whereClause += ` AND d.camera_id = $${paramIndex}`;
       params.push(cameraId);
       paramIndex++;
     }
@@ -272,14 +299,15 @@ async function sendFilteredStats(ws, userId, filters) {
 
     const statsResult = await pool.query(`
       SELECT 
-        COUNT(*) as total_detections,
-        COUNT(DISTINCT d.cameraid) as active_cameras,
+        COUNT(DISTINCT d.detection_id) as total_detections,
+        COUNT(DISTINCT d.camera_id) as active_cameras,
         COUNT(DISTINCT d.category_id) as active_categories,
         MAX(d.detection_time) as latest_detection,
         AVG(d.confidence) as avg_confidence,
-        SUM(d.object_count) as total_objects
+        SUM(d.object_count) as total_objects,
+        MAX(d.object_count) as max_object_count
       FROM detections d
-      LEFT JOIN camera_category_mapping ccm ON d.cameraid = ccm.cameraid
+      INNER JOIN camera_category_mapping ccm ON d.camera_id = ccm.camera_id
       ${whereClause}
     `, params);
 
@@ -294,6 +322,7 @@ async function sendFilteredStats(ws, userId, filters) {
         latestDetection: stats.latest_detection,
         avgConfidence: parseFloat(stats.avg_confidence) || 0,
         totalObjects: parseInt(stats.total_objects) || 0,
+        maxObjectCount: parseInt(stats.max_object_count) || 0,
         filters: filters,
         timestamp: new Date().toISOString()
       }

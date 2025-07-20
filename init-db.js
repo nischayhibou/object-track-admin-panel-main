@@ -81,7 +81,7 @@ const initQueries = [
   `CREATE TABLE IF NOT EXISTS detections (
     detection_id UUID DEFAULT uuid_generate_v4(),
     organization_id UUID,
-    camera_id UUID,
+    camera_id VARCHAR(255),
     tracking_id UUID,
     category_id UUID,
     detection_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -92,7 +92,29 @@ const initQueries = [
     image_filename VARCHAR(255),
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );`
+  );`,
+
+  // Insert sample detection data for testing
+  `INSERT INTO detections (camera_id, detection_time, confidence, object_count, video_filename, image_filename) VALUES 
+    ('CAM001', NOW() - INTERVAL '2 hours', 0.85, 3, 'video_001.mp4', 'image_001.jpg'),
+    ('CAM001', NOW() - INTERVAL '1 hour 45 minutes', 0.92, 2, 'video_002.mp4', 'image_002.jpg'),
+    ('CAM001', NOW() - INTERVAL '1 hour 30 minutes', 0.78, 1, 'video_003.mp4', 'image_003.jpg'),
+    ('CAM002', NOW() - INTERVAL '3 hours', 0.88, 4, 'video_004.mp4', 'image_004.jpg'),
+    ('CAM002', NOW() - INTERVAL '2 hours 30 minutes', 0.91, 2, 'video_005.mp4', 'image_005.jpg'),
+    ('CAM003', NOW() - INTERVAL '4 hours', 0.82, 1, 'video_006.mp4', 'image_006.jpg'),
+    ('CAM003', NOW() - INTERVAL '3 hours 15 minutes', 0.89, 3, 'video_007.mp4', 'image_007.jpg'),
+    ('CAM003', NOW() - INTERVAL '2 hours 45 minutes', 0.76, 2, 'video_008.mp4', 'image_008.jpg')
+  ON CONFLICT DO NOTHING;`,
+
+  // Create object_status_history table
+  `CREATE TABLE IF NOT EXISTS object_status_history (
+    id SERIAL PRIMARY KEY,
+    object_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    changed_by VARCHAR(255) NOT NULL
+  );`,
 ];
 
 async function initializeDatabase() {

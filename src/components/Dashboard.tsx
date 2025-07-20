@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
 import { DATE_TIME_FORMAT } from '@/dateFormat';
 import axios from '@/utils/axiosInstance';
-import { Search, Camera, Activity, Users, AlertTriangle, LogOut, Plus, MoreVertical } from 'lucide-react';
+import { Search, Camera, Activity, AlertTriangle, LogOut, Plus, MoreVertical, Clock } from 'lucide-react';
 import { useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -37,7 +37,8 @@ const Dashboard = () => {
     activeTracking: 0,
     inactiveAlerts: 0,
     latestUpdate: null,
-    typeCounts: {}
+    totalDetections: 0,
+    maxObjectCount: 0
   });
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
@@ -61,7 +62,7 @@ const Dashboard = () => {
 
   // WebSocket connection for real-time updates
   const wsUrl = `ws://localhost:5000/ws`;
-  const { isConnected, isConnecting, error: wsError, requestStats, requestUpdates, requestFilteredStats } = useWebSocket({
+  const { isConnected } = useWebSocket({
     url: wsUrl,
     token: token || '',
     onTokenExpired: () => {
@@ -78,15 +79,27 @@ const Dashboard = () => {
         case 'INITIAL_STATS':
         case 'COUNT_UPDATE':
           // Update stats with real-time data
-          if (message.data?.stats) {
-            const totalObjects = message.data.stats.reduce((sum: number, stat: any) => sum + stat.totalObjects, 0);
-            const activeTracking = message.data.stats.reduce((sum: number, stat: any) => sum + stat.recentObjects, 0);
+          if (message.data?.overallStats) {
+            const overallStats = message.data.overallStats;
             setLiveStats({
-              totalObjects,
-              activeTracking,
+              totalObjects: overallStats.totalObjects || 0,
+              activeTracking: overallStats.totalDetections || 0,
               inactiveAlerts: 0,
               latestUpdate: message.data.timestamp,
-              typeCounts: {}
+              totalDetections: overallStats.totalDetections || 0,
+              maxObjectCount: overallStats.maxObjectCount || 0
+            });
+          } else if (message.data?.stats) {
+            const totalObjects = message.data.stats.reduce((sum: number, stat: any) => sum + stat.totalObjects, 0);
+            const totalDetections = message.data.stats.reduce((sum: number, stat: any) => sum + stat.totalDetections, 0);
+            const maxObjectCount = Math.max(...message.data.stats.map((stat: any) => stat.maxObjectCount || 0));
+            setLiveStats({
+              totalObjects,
+              activeTracking: totalDetections,
+              inactiveAlerts: 0,
+              latestUpdate: message.data.timestamp,
+              totalDetections,
+              maxObjectCount
             });
           }
           break;
@@ -182,9 +195,10 @@ useEffect(() => {
     if (isConnected && liveStats.totalObjects > 0) {
       return {
         totalObjects: liveStats.totalObjects,
-        activeTracking: liveStats.activeTracking,
+        activeTracking: liveStats.totalDetections,
         alerts: liveStats.inactiveAlerts,
-        latestDateTime: liveStats.latestUpdate
+        latestDateTime: liveStats.latestUpdate,
+        maxObjectCount: liveStats.maxObjectCount
       };
     }
 
@@ -194,7 +208,8 @@ useEffect(() => {
         totalObjects: 0,
         activeTracking: 0,
         alerts: 0,
-        latestDateTime: null
+        latestDateTime: null,
+        maxObjectCount: 0
       };
     }
 
@@ -210,9 +225,47 @@ useEffect(() => {
       totalObjects,
       activeTracking,
       alerts,
-      latestDateTime
+      latestDateTime,
+      maxObjectCount: 0 // Fallback doesn't have detection data
     };
   }, [isConnected, liveStats, recentObjects]);
+
+  // Calculate object type counts
+  const objectTypeCounts = useMemo(() => {
+    if (!Array.isArray(recentObjects) || recentObjects.length === 0) {
+      return {};
+    }
+
+    const counts: { [key: string]: number } = {};
+    recentObjects.forEach(obj => {
+      counts[obj.type] = (counts[obj.type] || 0) + 1;
+    });
+
+    return counts;
+  }, [recentObjects]);
+
+  // Get unique object types for cards
+  const uniqueObjectTypes = useMemo(() => {
+    if (!Array.isArray(recentObjects) || recentObjects.length === 0) {
+      return [];
+    }
+    return [...new Set(recentObjects.map(obj => obj.type))];
+  }, [recentObjects]);
+
+  // Filter objects based on search term
+  const filteredObjects = useMemo(() => {
+    if (!Array.isArray(recentObjects)) return [];
+    
+    if (!searchTerm.trim()) return recentObjects;
+    
+    const search = searchTerm.toLowerCase();
+    return recentObjects.filter((obj) => 
+      obj.name?.toLowerCase().includes(search) ||
+      obj.type?.toLowerCase().includes(search) ||
+      obj.status?.toLowerCase().includes(search) ||
+      obj.location?.toLowerCase().includes(search)
+    );
+  }, [recentObjects, searchTerm]);
 
 
   const getStatusColor = (status: string) => {
@@ -293,17 +346,7 @@ useEffect(() => {
 }, [userid, toast]);
 
 
-  const filteredObjects = recentObjects.filter((obj) => {
-    const search = searchTerm.toLowerCase();
-    return (
-      obj.name?.toLowerCase().includes(search) ||
-      obj.type?.toLowerCase().includes(search) ||
-      obj.status?.toLowerCase().includes(search) ||
-      obj.location?.toLowerCase().includes(search)
-    );
-  });
-
-const handleFormSubmit = async (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
   if (!newObject.type || !newObject.status) {
     toast({
@@ -403,6 +446,21 @@ const handleFormSubmit = async (e: React.FormEvent) => {
   }
 };
 
+  // Calculate connection status based on object statuses
+  const connectionStatus = useMemo(() => {
+    if (!Array.isArray(recentObjects) || recentObjects.length === 0) {
+      return { status: 'offline', text: 'Offline', color: 'red' };
+    }
+
+    const hasActiveObjects = recentObjects.some(obj => obj.status === 'Active');
+    
+    if (hasActiveObjects) {
+      return { status: 'live', text: 'Live', color: 'green' };
+    } else {
+      return { status: 'offline', text: 'Offline', color: 'red' };
+    }
+  }, [recentObjects]);
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -415,24 +473,28 @@ const handleFormSubmit = async (e: React.FormEvent) => {
             </div>
             <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
-                    {isConnected ? (
+                    {connectionStatus.status === 'live' ? (
                         <div className="flex items-center text-green-600">
                             <div className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse"></div>
-                            <span className="text-xs">Live</span>
+                            <span className="text-xs">{connectionStatus.text}</span>
                         </div>
-                    ) : isConnecting ? (
+                    ) : connectionStatus.status === 'offline' ? (
+                        <div className="flex items-center text-red-600">
+                            <div className="w-2 h-2 bg-red-500 rounded-full mr-1"></div>
+                            <span className="text-xs">{connectionStatus.text}</span>
+                        </div>
+                    ) : (
                         <div className="flex items-center text-yellow-600">
                             <div className="w-2 h-2 bg-yellow-500 rounded-full mr-1 animate-pulse"></div>
                             <span className="text-xs">Connecting...</span>
                         </div>
-                    ) : (
-                        <div className="flex items-center text-red-600">
-                            <div className="w-2 h-2 bg-red-500 rounded-full mr-1"></div>
-                            <span className="text-xs">Offline</span>
-                        </div>
                     )}
                 </div>
                 <span className="text-sm text-gray-600">Welcome, {userInfo.firstname + " " + userInfo.lastname}</span>
+                <Button variant="outline" size="sm" onClick={() => navigate('/history')}>
+                    <Clock className="h-4 w-4 mr-2" />
+                    History
+                </Button>
                 <Button variant="outline" size="sm" onClick={handleLogout}>
                     <LogOut className="h-4 w-4 mr-2" />
                     Logout
@@ -443,6 +505,28 @@ const handleFormSubmit = async (e: React.FormEvent) => {
 </header>
 
 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    {/* Object Type Counter Cards */}
+    {uniqueObjectTypes.length > 0 && (
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Object Type Counters</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 mb-8">
+          {uniqueObjectTypes.map((objectType) => (
+            <Card key={objectType} className="bg-gradient-to-br from-blue-50 to-indigo-50">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{objectType}</CardTitle>
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">{objectTypeCounts[objectType] || 0}</div>
+                <p className="text-xs text-muted-foreground">Active {objectType}s</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* Main Stats Cards */}
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -474,6 +558,17 @@ const handleFormSubmit = async (e: React.FormEvent) => {
 
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Max Object Count</CardTitle>
+                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold text-blue-600">{stats.maxObjectCount}</div>
+                <p className="text-xs text-muted-foreground">Peak detection count</p>
+            </CardContent>
+        </Card>
+
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Inactive Alerts</CardTitle>
                 <AlertTriangle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
@@ -482,17 +577,6 @@ const handleFormSubmit = async (e: React.FormEvent) => {
                 <p className="text-xs text-muted-foreground">Requires attention</p>
             </CardContent>
         </Card>
-
-        {/* <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">System Users</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold">{stats.users}</div>
-                <p className="text-xs text-muted-foreground">Active users</p>
-            </CardContent>
-        </Card> */}
     </div>
     {/* Controls and Table */}
     <Card>
@@ -537,7 +621,8 @@ const handleFormSubmit = async (e: React.FormEvent) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredObjects.map((object) => (
+                        {filteredObjects.length > 0 ? (
+                          filteredObjects.map((object) => (
                             <tr key={object.id} className="border-b hover:bg-gray-50">
                                 <td className="p-3 font-mono text-sm">{object.name}</td>
                                 <td className="p-3">
@@ -561,21 +646,31 @@ const handleFormSubmit = async (e: React.FormEvent) => {
                                     </Button>
 
                                     {openMenuId === object.id && (
-        <div
-          ref={menuRef}
-          className="absolute right-3 top-10 w-28 bg-white shadow-md rounded-md z-10"
-        >
-          <ul className="text-sm text-gray-700">
-            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer" onClick={() => handleEdit(object)}>Edit</li>
-            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer" onClick={() => handleDelete(object)}>Delete</li>
-          </ul>
-        </div>
-      )}
+          <div
+            ref={menuRef}
+            className="absolute right-3 top-10 w-28 bg-white shadow-md rounded-md z-10"
+          >
+            <ul className="text-sm text-gray-700">
+              <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer" onClick={() => handleEdit(object)}>Edit</li>
+              <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer" onClick={() => handleDelete(object)}>Delete</li>
+            </ul>
+          </div>
+        )}
 
                                 </td>
-
                             </tr>
-                        ))}
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="p-8 text-center text-gray-500">
+                              <div className="flex flex-col items-center space-y-2">
+                                <Search className="h-8 w-8 text-gray-400" />
+                                <p className="text-lg font-medium">No Results Found</p>
+                                <p className="text-sm">Try adjusting your search terms or add new objects</p>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                     </tbody>
                 </table>
             </div>
