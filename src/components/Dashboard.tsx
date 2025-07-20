@@ -28,7 +28,13 @@ interface RecentObject {
 const Dashboard = () => {
   const { toast } = useToast();
   const menuRef = useRef<HTMLDivElement>(null);
-  
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
+
 
   const [searchTerm, setSearchTerm] = useState('');
   const [userInfo, setUserInfo] = useState({ username: '', firstname: '', lastname: '' });
@@ -66,7 +72,6 @@ const Dashboard = () => {
     url: wsUrl,
     token: token || '',
     onTokenExpired: () => {
-      console.log('Token refresh failed, redirecting to login');
       toast({
         title: "Session Expired",
         description: "Please log in again to continue.",
@@ -111,21 +116,22 @@ const Dashboard = () => {
           break;
         case 'FILTERED_STATS':
           // Handle filtered stats
-          console.log('Filtered stats:', message.data);
           break;
         case 'REAL_TIME_UPDATE':
           // Handle real-time updates
-          console.log('Real-time update:', message.data);
           break;
         case 'ERROR':
-          console.error('WebSocket error:', message.message);
+          toast({
+            title: "Error",
+            description: "WebSocket error: " + message.message,
+            variant: "destructive"
+          });
           break;
         default:
-          console.log('Unknown WebSocket message:', message);
+          break;
       }
     },
     onConnect: () => {
-      console.log('WebSocket connected');
       toast({
         title: "Success",
         description: "Real-time connection established",
@@ -133,18 +139,18 @@ const Dashboard = () => {
       });
     },
     onDisconnect: () => {
-      console.log('WebSocket disconnected');
-      toast({
-        title: "Warning",
-        description: "Real-time connection lost",
-        variant: "destructive"
-      });
+      if (isMounted.current) {
+        toast({
+          title: "Warning",
+          description: "Real-time connection lost",
+          variant: "destructive"
+        });
+      }
     },
     onError: (error) => {
-      console.error('WebSocket error:', error);
       toast({
         title: "Error",
-        description: "Real-time connection error",
+        description: "Real-time connection error: " + (error && error.toString ? error.toString() : ''),
         variant: "destructive"
       });
     }
@@ -291,7 +297,6 @@ useEffect(() => {
 };
 
   const handleEdit = (object: RecentObject) => {
-    debugger
     setEditMode(true);
     setNewObject({
       id: object.id,
@@ -363,10 +368,9 @@ useEffect(() => {
       params: { username }
     });
 
-    const payload = {
-      id : newObject.id,
+    let payload: any = {
+      id: newObject.id,
       userId: String(response.data.userid),
-      cameraId: String(newObject.cameraId),
       cameraURL: newObject.cameraURL,
       userName: response.data.username,
       objectId: newObject.objectId,
@@ -375,6 +379,10 @@ useEffect(() => {
       location: newObject.location,
       lastUpdatedBy: response.data.username,
     };
+    // Only include cameraId if editing
+    if (editMode && newObject.cameraId) {
+      payload.cameraId = newObject.cameraId;
+    }
 
     // Call the unified upsert API
     const result = await axios.post(`/objects`, payload);
@@ -558,17 +566,6 @@ useEffect(() => {
 
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Max Object Count</CardTitle>
-                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-                <div className="text-2xl font-bold text-blue-600">{stats.maxObjectCount}</div>
-                <p className="text-xs text-muted-foreground">Peak detection count</p>
-            </CardContent>
-        </Card>
-
-        <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Inactive Alerts</CardTitle>
                 <AlertTriangle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
@@ -735,15 +732,16 @@ useEffect(() => {
                   readOnly
                   className="bg-gray-100 cursor-not-allowed"
                 />
-                <label className="block text-sm font-medium text-gray-700">Camera Id</label>
-                <Input
-                    placeholder="Camera Id"
-                    value={newObject.cameraId}
-                    onChange={(e) => {
-                        const numericValue = e.target.value.replace(/\D/g, ''); // Remove non-digits
-                        setNewObject({ ...newObject, cameraId: numericValue });
-                    }}
-                />
+                {editMode && (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700">Camera Id</label>
+                    <Input
+                      value={newObject.cameraId}
+                      readOnly
+                      className="bg-gray-100 cursor-not-allowed"
+                    />
+                  </>
+                )}
                 <label className="block text-sm font-medium text-gray-700">Camera URL</label>
                 <Input
                     placeholder="Camera URL"

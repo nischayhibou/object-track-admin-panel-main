@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -68,7 +68,6 @@ const History = () => {
   const [selectedType, setSelectedType] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
   const [expandedCamera, setExpandedCamera] = useState<string | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
@@ -79,6 +78,7 @@ const History = () => {
   const [total, setTotal] = useState(0);
   const [cameraOptions, setCameraOptions] = useState<string[]>([]);
   const [statusOptions, setStatusOptions] = useState<string[]>([]);
+  const [avgConfidence, setAvgConfidence] = useState(0);
 
   // Get unique cameras and types for filters
   const cameras = useMemo(() => {
@@ -91,32 +91,35 @@ const History = () => {
     return uniqueTypes.sort();
   }, [historyData]);
 
-  const loadHistoryData = async () => {
+  const loadHistoryData = useCallback(() => {
     if (!userid) return;
     setLoading(true);
     try {
       const params = new URLSearchParams();
       params.append('page', String(page));
       params.append('limit', String(limit));
-      if (searchTerm) params.append('search', searchTerm);
       if (selectedCamera) params.append('cameraId', selectedCamera);
       if (selectedType) params.append('status', selectedType);
-      const response = await axios.get(`/history/user/${userid}?${params.toString()}`);
-      if (response.data.success) {
-        setHistoryData(response.data.data);
-        setTotal(response.data.total || 0);
-      }
-    } catch (error) {
-      console.error('Error loading history data:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load history data",
-        variant: "destructive"
-      });
-    } finally {
+      axios.get(`/history/user/${userid}?${params.toString()}`)
+        .then(response => {
+          if (response.data.success) {
+            setHistoryData(response.data.data);
+            setTotal(response.data.total || 0);
+            setAvgConfidence(response.data.avgConfidence || 0);
+          }
+        })
+        .catch(() => {
+          toast({
+            title: "Error",
+            description: "Failed to load history data",
+            variant: "destructive"
+          });
+        })
+        .finally(() => setLoading(false));
+    } catch {
       setLoading(false);
     }
-  };
+  }, [userid, page, limit, selectedCamera, selectedType, toast]);
 
   useEffect(() => {
     if (!token || !username) {
@@ -125,7 +128,7 @@ const History = () => {
     }
     loadHistoryData();
     // eslint-disable-next-line
-  }, [token, username, navigate, page, limit]);
+  }, [token, username, navigate, page, limit, loadHistoryData]);
 
   useEffect(() => {
     if (!userid) return;
@@ -209,11 +212,26 @@ const History = () => {
 
   // Calculate totalDetections and totalObjects as described
   const totalDetections = historyData.reduce((sum, row) => sum + (Number(row.max_object_count) || 0), 0);
-  const objectIdCounts = historyData.reduce((acc, row) => {
-    acc[row.object_id] = (acc[row.object_id] || 0) + 1;
+  const objectIdCounts = historyData.reduce<Record<string, number>>((acc, row) => {
+    if (row.object_id) {
+      acc[row.object_id] = (acc[row.object_id] || 0) + 1;
+    }
     return acc;
   }, {});
-  const totalObjects = (Object.values(objectIdCounts) as number[]).reduce((sum, count) => sum + count, 0);
+  const totalObjects = Object.values(objectIdCounts).reduce((sum: number, count: number) => sum + count, 0);
+
+  // Add filteredData useMemo for client-side search like Dashboard
+  const filteredData = useMemo(() => {
+    if (!searchTerm.trim()) return historyData;
+    const search = searchTerm.toLowerCase();
+    return historyData.filter(row =>
+      (typeof row.object_id === 'string' && row.object_id.toLowerCase().includes(search)) ||
+      (typeof row.status === 'string' && row.status.toLowerCase().includes(search)) ||
+      (typeof row.changed_by === 'string' && row.changed_by.toLowerCase().includes(search)) ||
+      (typeof row.cameraid === 'string' && row.cameraid.toLowerCase().includes(search)) ||
+      (typeof row.cameraurl === 'string' && row.cameraurl.toLowerCase().includes(search))
+    );
+  }, [historyData, searchTerm]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -268,10 +286,7 @@ const History = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {historyData.length > 0 
-                  ? (historyData.reduce((sum, entry) => sum + 1, 0) / historyData.length).toFixed(1)
-                  : '0.0'
-                }%
+                {(avgConfidence * 100).toFixed(1)}%
               </div>
               <p className="text-xs text-muted-foreground">Detection accuracy</p>
             </CardContent>
@@ -292,15 +307,7 @@ const History = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowFilters(!showFilters)}
-                >
-                  <Filter className="h-4 w-4 mr-2" />
-                  Filters
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={loadHistoryData}
+                  onClick={() => { setSearchTerm(''); loadHistoryData(); }}
                   disabled={loading}
                 >
                   <Calendar className="h-4 w-4 mr-2" />
@@ -318,56 +325,6 @@ const History = () => {
               </div>
             </div>
           </CardHeader>
-
-          {/* Filters */}
-          {showFilters && (
-            <CardContent className="border-t">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                  <Input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                  <Input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Camera</label>
-                  <select
-                    value={selectedCamera}
-                    onChange={e => { setSelectedCamera(e.target.value); setPage(1); }}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring focus:ring-blue-500 text-sm"
-                  >
-                    <option value="">All Cameras</option>
-                    {cameraOptions.map(camera => (
-                      <option key={camera} value={camera}>{camera}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                  <select
-                    value={selectedType}
-                    onChange={e => { setSelectedType(e.target.value); setPage(1); }}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring focus:ring-blue-500 text-sm"
-                  >
-                    <option value="">All Statuses</option>
-                    {statusOptions.map(status => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </CardContent>
-          )}
 
           <CardContent>
             <div className="relative">
@@ -389,6 +346,7 @@ const History = () => {
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-gray-50">
+                    <th className="text-left p-4 font-medium text-gray-900">Serial No.</th>
                     <th className="text-left p-4 font-medium text-gray-900">ID</th>
                     <th className="text-left p-4 font-medium text-gray-900">Object ID</th>
                     <th className="text-left p-4 font-medium text-gray-900">User ID</th>
@@ -401,9 +359,10 @@ const History = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {historyData.length > 0 ? (
-                    historyData.map((row) => (
+                  {filteredData.length > 0 ? (
+                    filteredData.map((row, index) => (
                       <tr key={row.id} className="border-b hover:bg-gray-50">
+                        <td className="p-4">{index + 1}</td>
                         <td className="p-4">{row.id}</td>
                         <td className="p-4">{row.object_id}</td>
                         <td className="p-4">{row.user_id}</td>
@@ -422,7 +381,7 @@ const History = () => {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-gray-500">
+                      <td colSpan={10} className="p-8 text-center text-gray-500">
                         <div className="flex flex-col items-center space-y-2">
                           <Search className="h-8 w-8 text-gray-400" />
                           <p className="text-lg font-medium">No History Data Found</p>

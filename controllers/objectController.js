@@ -11,7 +11,6 @@ const { table, dropdownTable } = config.database;
 const objectSchema = Joi.object({
   id: Joi.number().allow(null).optional(),
   userId: Joi.string().required(),
-  cameraId: Joi.string().required(),
   cameraURL: Joi.string().uri().required(),
   userName: Joi.string().required(),
   objectId: Joi.string().required(),
@@ -22,14 +21,13 @@ const objectSchema = Joi.object({
 });
 
 export const saveObject = async (req, res) => {
-  debugger;
-  const { error, value } = objectSchema.validate(req.body);
+  const { error, value } = objectSchema.validate(req.body, { allowUnknown: true });
   if (error) {
     return res.status(400).json({ error: error.details[0].message });
   }
 
   const {
-    id, userId, cameraId, cameraURL,
+    id, userId, cameraURL,
     userName, objectId, type,
     status = 'Inactive', location, lastUpdatedBy
   } = value;
@@ -46,7 +44,7 @@ export const saveObject = async (req, res) => {
       previousStatus = prev.rows[0]?.status;
       statusChanged = previousStatus !== status;
 
-      // Update existing record using ccmid as the primary key
+      // Update existing record using ccmid as the primary key (do not change cameraid)
       query = `
         UPDATE ${table}
         SET
@@ -67,7 +65,14 @@ export const saveObject = async (req, res) => {
       ];
     } else {
       statusChanged = true; // Always log on insert
-      // Insert new record with generated ccmguid
+      // Generate a unique cameraid for this user
+      const cameraIdResult = await pool.query(
+        `SELECT COALESCE(MAX(CAST(cameraid AS INTEGER)), 0) + 1 AS next_cameraid
+         FROM ${table} WHERE userid = $1`, [userId]
+      );
+      const newCameraId = cameraIdResult.rows[0].next_cameraid.toString();
+
+      // Insert new record with generated cameraid
       const ccmGuid = uuidv4();
       query = `
         INSERT INTO ${table}
@@ -77,7 +82,7 @@ export const saveObject = async (req, res) => {
         RETURNING ccmguid
       `;
       values = [
-        ccmGuid, userId, cameraId, cameraURL,
+        ccmGuid, userId, newCameraId, cameraURL,
         userName, objectId, type, status,
         location, lastUpdatedBy, lastModifiedDate
       ];
@@ -173,38 +178,10 @@ export const getHistoryData = async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   const offset = (page - 1) * limit;
-  const search = req.query.search || '';
-  const cameraId = req.query.cameraId || '';
-  const status = req.query.status || '';
 
   if (!userid) return res.status(400).json({ error: 'Missing userid' });
 
   try {
-    let whereClause = 'u.userid = $1';
-    let params = [userid];
-    let paramIndex = 2;
-
-    if (search) {
-      whereClause += ` AND (
-        osh.object_id ILIKE $${paramIndex} OR
-        osh.status ILIKE $${paramIndex} OR
-        osh.changed_by ILIKE $${paramIndex} OR
-        ccm.cameraid ILIKE $${paramIndex}
-      )`;
-      params.push(`%${search}%`);
-      paramIndex++;
-    }
-    if (cameraId) {
-      whereClause += ` AND ccm.cameraid = $${paramIndex}`;
-      params.push(cameraId);
-      paramIndex++;
-    }
-    if (status) {
-      whereClause += ` AND osh.status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
-
     const query = `
       WITH detection_counts AS (
         SELECT 
@@ -212,36 +189,48 @@ export const getHistoryData = async (req, res) => {
             MAX(object_count) AS max_object_count
         FROM detections
         GROUP BY userid
+      ),
+      main_data AS (
+        SELECT 
+            osh.*, 
+            ccm.cameraid, 
+            ccm.cameraurl, 
+            COALESCE(dc.max_object_count, 0) AS max_object_count
+        FROM object_status_history osh
+        LEFT JOIN detection_counts dc ON dc.userid = osh.user_id
+        LEFT JOIN LATERAL (
+            SELECT ccm_inner.cameraid, ccm_inner.cameraurl
+            FROM camera_category_mapping ccm_inner
+            WHERE ccm_inner.userid = osh.user_id
+            LIMIT 1
+        ) ccm ON true
+        LEFT JOIN users u ON u.userid = osh.user_id
+        WHERE u.userid = $1
       )
-      SELECT DISTINCT ON (osh.id)
-        osh.*, 
-        ccm.cameraid, 
-        ccm.cameraurl, 
-        COALESCE(dc.max_object_count, 0) AS max_object_count
-      FROM object_status_history osh
-      LEFT JOIN detection_counts dc ON dc.userid = osh.user_id
-      LEFT JOIN camera_category_mapping ccm ON ccm.userid = osh.user_id
-      LEFT JOIN users u ON u.userid = ccm.userid
-      WHERE ${whereClause}
-      ORDER BY osh.id
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1};
+      SELECT 
+          ROW_NUMBER() OVER (ORDER BY changed_at DESC) AS serial_no,
+          *
+      FROM main_data
+      ORDER BY changed_at DESC
+      LIMIT $2 OFFSET $3;
     `;
-    params.push(limit, offset);
+    const params = [userid, limit, offset];
 
     const { rows } = await pool.query(query, params);
 
     // Get total count for pagination
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM object_status_history osh
-       LEFT JOIN camera_category_mapping ccm ON ccm.userid = osh.user_id
-       LEFT JOIN users u ON u.userid = ccm.userid
-       WHERE ${whereClause}`, params.slice(0, paramIndex - 1)
+      `SELECT COUNT(*) FROM object_status_history WHERE user_id = $1`, [userid]
     );
     const total = parseInt(countResult.rows[0].count, 10);
 
-    res.status(200).json({ success: true, data: rows, total });
+    const avgConfidenceResult = await pool.query(
+      `SELECT AVG(confidence) AS avg_confidence FROM detections WHERE userid = $1`, [userid]
+    );
+    const avgConfidence = Number(avgConfidenceResult.rows[0].avg_confidence) || 0;
+
+    res.status(200).json({ success: true, data: rows, total, avgConfidence });
   } catch (err) {
-    console.error('Error fetching history data:', err);
     res.status(500).json({ error: 'Failed to fetch history data' });
   }
 };

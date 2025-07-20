@@ -56,7 +56,7 @@ export const useWebSocket = ({
         return response.data.token;
       }
     } catch (error) {
-      console.error('WebSocket: Token refresh failed:', error);
+      // console.error('WebSocket: Token refresh failed:', error);
     }
     return null;
   }, []);
@@ -93,7 +93,7 @@ export const useWebSocket = ({
           
           onMessage?.(message);
         } catch (err) {
-          console.error('Failed to parse WebSocket message:', err);
+          // console.error('Failed to parse WebSocket message:', err);
         }
       };
 
@@ -122,13 +122,13 @@ export const useWebSocket = ({
       };
 
       ws.onerror = (event) => {
-        console.error('WebSocket: Connection error', event);
+        // console.error('WebSocket: Connection error', event);
         setError('WebSocket connection error');
         onError?.(event);
       };
 
     } catch (err) {
-      console.error('WebSocket: Failed to create connection', err);
+      // console.error('WebSocket: Failed to create connection', err);
       setError('Failed to create WebSocket connection');
       setIsConnecting(false);
     }
@@ -164,7 +164,7 @@ export const useWebSocket = ({
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     } else {
-      console.warn('WebSocket: Cannot send message - not connected');
+      // console.warn('WebSocket: Cannot send message - not connected');
     }
   }, []);
 
